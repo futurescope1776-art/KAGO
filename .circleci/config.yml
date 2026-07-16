@@ -1,6 +1,8 @@
-# Note on setup: false: With setup disabled the pipeline runs main_workflow directly on push — no setup-state continuation is attempted, so the 409 "Pipeline is not in setup state" error from the Chunk harness "Merge and continue" step will not occur. The tradeoff is that Chunk-driven dynamic config continuation will not work on this branch; if that's needed later, setup: true must be restored.
+# setup: true is required — the Chunk harness enters setup state and calls the
+# CircleCI pipeline continue API ("Merge and continue"). With setup: false the
+# pipeline never enters setup state and that call returns 409.
 version: 2.1
-setup: false
+setup: true
 
 jobs:
   upload_youtube_short:
@@ -9,55 +11,68 @@ jobs:
     steps:
       - checkout
       - run:
-          name: Install YouTube deps
+          name: Install deps
           command: |
+            sudo apt-get update -q && sudo apt-get install -y ffmpeg
             pip install google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
       - run:
-          name: Upload YouTube Short
+          name: Validate video
           command: |
-            if [ -f "upload_youtube.py" ]; then
-              python upload_youtube.py
-            elif [ -f "scripts/upload_youtube.py" ]; then
-              python scripts/upload_youtube.py
-            else
-              echo "Checking for YouTube script..."
-              find . -name "*youtube*.py" -type f
-              python $(find . -name "*youtube*.py" | head -1)
-            fi
+            python - <<'EOF'
+            import subprocess, sys, os, json
 
-  deploy:
-    docker:
-      - image: cimg/base:current
-    steps:
-      - checkout
+            result = subprocess.run(
+                ['ffprobe', '-v', 'quiet', '-print_format', 'json', '-show_streams', 'video.mp4'],
+                capture_output=True, text=True
+            )
+            if result.returncode != 0:
+                print(f"ffprobe failed: {result.stderr}")
+                sys.exit(1)
+
+            data = json.loads(result.stdout)
+            vstreams = [s for s in data['streams'] if s['codec_type'] == 'video']
+            if not vstreams:
+                print("No video stream found in video.mp4")
+                sys.exit(1)
+
+            s = vstreams[0]
+            w, h = s['width'], s['height']
+            duration = float(s.get('duration', 0))
+            size_mb = os.path.getsize('video.mp4') / 1024 / 1024
+
+            topic = os.getenv('VIDEO_TOPIC', '').lower()
+            long_topic = any(k in topic for k in ['tutorial', 'guide', 'explainer', 'deep', 'how to'])
+            short_topic = any(k in topic for k in ['news', 'quick', 'tip'])
+            max_dur = 120 if (long_topic or not short_topic) else 60
+
+            errors = []
+            if h <= w:
+                errors.append(f"Not vertical: {w}x{h} (height must exceed width)")
+            if w < 720 or h < 1280:
+                errors.append(f"Resolution too small: {w}x{h} (min 720x1280)")
+            if duration < 30:
+                errors.append(f"Too short: {duration:.1f}s (min 30s)")
+            if duration > max_dur:
+                errors.append(f"Too long: {duration:.1f}s (max {max_dur}s for this VIDEO_TOPIC)")
+            if size_mb > 100:
+                errors.append(f"File too large: {size_mb:.1f}MB (max 100MB)")
+
+            if errors:
+                for e in errors:
+                    print(f"FAIL: {e}")
+                sys.exit(1)
+
+            print(f"OK: {w}x{h}, {duration:.1f}s, {size_mb:.1f}MB")
+            EOF
       - run:
-          name: Plan a deploy
-          command: |
-            circleci run release plan \
-              --environment-name="youtube-production" \
-              --component-name="future-work-money-shorts" \
-              --target-version="${CIRCLE_SHA1}"
-      - run:
-          name: Update a deploy to SUCCESS
-          command: circleci run release update --status=SUCCESS
-          when: on_success
-      - run:
-          name: Update planned deploy to FAILED
-          command: circleci run release update --status=FAILED
-          when: on_fail
+          name: Upload to YouTube
+          command: python upload_youtube.py
 
 workflows:
-  version: 2
   main_workflow:
     jobs:
       - upload_youtube_short:
           context: ai-social
-          filters:
-            branches:
-              only:
-                - main
-                - chunk/fix-setup-pipeline-flag
-      - deploy:
           filters:
             branches:
               only:

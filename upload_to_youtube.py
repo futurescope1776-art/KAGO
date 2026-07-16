@@ -126,4 +126,5 @@ def upload_video(youtube, metadata, video_path):
 if __name__ == "__main__":
     metadata = load_metadata()
     youtube = authenticate_youtube()
-    upload_video(youtube, metadata, "output/final_video.mp4")
+    video_path = "output/final_video.mp4" if os.path.exists("output/final_video.mp4") else "video.mp4"
+    upload_video(youtube, metadata, video_path)
