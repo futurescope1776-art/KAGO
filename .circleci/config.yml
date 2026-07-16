@@ -77,3 +77,4 @@ workflows:
             branches:
               only:
                 - main
+                - chunk/fix-setup-pipeline-flag
