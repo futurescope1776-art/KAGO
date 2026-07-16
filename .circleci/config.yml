@@ -1,6 +1,30 @@
 version: 2.1
+setup: false
 
 jobs:
+  upload_youtube_short:
+    docker:
+      - image: cimg/python:3.11
+    steps:
+      - checkout
+      - run:
+          name: Install YouTube deps
+          command: |
+            pip install google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+      - run:
+          name: Upload YouTube Short
+          command: |
+            # If your script is in a different folder, change the path below
+            if [ -f "upload_youtube.py" ]; then
+              python upload_youtube.py
+            elif [ -f "scripts/upload_youtube.py" ]; then
+              python scripts/upload_youtube.py
+            else
+              echo "Checking for YouTube script..."
+              find . -name "*youtube*.py" -type f
+              python $(find . -name "*youtube*.py" | head -1)
+            fi
+
   deploy:
     docker:
       - image: cimg/base:current
@@ -12,7 +36,7 @@ jobs:
             circleci run release plan \
               --environment-name="youtube-production" \
               --component-name="future-work-money-shorts" \
-              --target-version="<some-version-name>"
+              --target-version="${CIRCLE_SHA1}"
       - run:
           name: Update a deploy to SUCCESS
           command: circleci run release update --status=SUCCESS
@@ -24,8 +48,14 @@ jobs:
 
 workflows:
   version: 2
-  deploy_workflow:
+  main_workflow:
     jobs:
+      - upload_youtube_short:
+          context: ai-social
+          filters:
+            branches:
+              only:
+                - main
       - deploy:
           filters:
             branches:
