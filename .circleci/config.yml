@@ -56,8 +56,10 @@ workflows:
             branches:
               only:
                 - main
+                - chunk/fix-setup-pipeline-flag
       - deploy:
           filters:
             branches:
               only:
                 - main
+                - chunk/fix-setup-pipeline-flag
