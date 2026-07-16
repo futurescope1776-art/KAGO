@@ -1,5 +1,5 @@
 version: 2.1
-setup: false
+setup: true
 
 jobs:
   upload_youtube_short:
