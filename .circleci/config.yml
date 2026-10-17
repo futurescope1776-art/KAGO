@@ -2,28 +2,64 @@ version: 2.1
 setup: false
 
 jobs:
-  upload_youtube_short:
+  generate_and_publish:
     docker:
       - image: cimg/python:3.11
+    resource_class: medium
     steps:
       - checkout
+
       - run:
-          name: Install YouTube deps
+          name: Install system dependencies
           command: |
-            pip install google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+            sudo apt-get update -q
+            sudo apt-get install -y -q \
+              ffmpeg \
+              imagemagick \
+              fonts-dejavu-core \
+              fonts-liberation
+
       - run:
-          name: Upload YouTube Short
+          name: Install Python dependencies
           command: |
-            # If your script is in a different folder, change the path below
-            if [ -f "upload_youtube.py" ]; then
-              python upload_youtube.py
-            elif [ -f "scripts/upload_youtube.py" ]; then
-              python scripts/upload_youtube.py
-            else
-              echo "Checking for YouTube script..."
-              find . -name "*youtube*.py" -type f
-              python $(find . -name "*youtube*.py" | head -1)
-            fi
+            pip install --upgrade pip --quiet
+            pip install --quiet \
+              openai \
+              gtts \
+              "moviepy==1.0.3" \
+              Pillow \
+              requests \
+              numpy \
+              imageio \
+              imageio-ffmpeg \
+              google-api-python-client \
+              google-auth \
+              google-auth-oauthlib \
+              google-auth-httplib2
+
+      - run:
+          name: "Step 1 – Generate content script (niche + OpenAI)"
+          command: python generate_content.py
+
+      - run:
+          name: "Step 2 – Generate video (TTS + Pexels clips + captions)"
+          command: python generate_video.py
+
+      - run:
+          name: "Step 3 – Upload to YouTube Shorts"
+          command: python upload_to_youtube.py
+
+      - run:
+          name: "Step 4 – Upload to Facebook Page Reel"
+          command: python upload_to_facebook.py
+
+      - run:
+          name: "Step 5 – Log post"
+          command: python log_post.py
+
+      - store_artifacts:
+          path: output
+          destination: output
 
   deploy:
     docker:
@@ -48,15 +84,35 @@ jobs:
 
 workflows:
   version: 2
-  main_workflow:
+
+  # Runs every weekday at 2 PM UTC (10 AM ET) to match the niche rotation
+  daily_publish:
+    triggers:
+      - schedule:
+          cron: "0 14 * * 1-5"
+          filters:
+            branches:
+              only:
+                - main
     jobs:
-      - upload_youtube_short:
+      - generate_and_publish:
+          context: ai-social
+      - deploy:
+          requires:
+            - generate_and_publish
+
+  # Also runs on every push to main (manual trigger / PR merge)
+  on_push:
+    jobs:
+      - generate_and_publish:
           context: ai-social
           filters:
             branches:
               only:
                 - main
       - deploy:
+          requires:
+            - generate_and_publish
           filters:
             branches:
               only:
