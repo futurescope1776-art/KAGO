@@ -22,16 +22,22 @@ def load_metadata():
         if os.path.exists(script_path):
             with open(script_path) as f:
                 data = json.load(f)
+            # Prefer pre-built youtube_title ([Niche] - Title | Future of Work and Money)
+            yt_title = data.get("youtube_title") or (data.get("title", "")[:95] + " #Shorts")
             return {
-                "title": (data.get("title", "")[:95] + " #Shorts").strip(),
-                "description": f"{data.get('caption', '')}\n\n{data.get('hashtags', '')}\n\nFuture of Work and Money - Helping 20s and 30s build wealth with AI and smart systems.",
-                "hashtags": data.get("hashtags", "#personalfinance #moneytok")
+                "title": yt_title[:100].strip(),
+                "description": (
+                    f"{data.get('caption', '')}\n\n"
+                    f"{data.get('hashtags', '')}\n\n"
+                    "Future of Work and Money - Helping 20s and 30s build wealth with AI and smart systems."
+                ),
+                "hashtags": data.get("hashtags", "#personalfinance #moneytok"),
             }
     except json.JSONDecodeError as e:
         logger.warning(f"Failed to parse script.json: {e}")
     except Exception as e:
         logger.warning(f"Error loading script.json: {e}")
-    
+
     # Fallback
     caption = "Future of Work and Money"
     if os.path.exists(caption_path):
@@ -40,11 +46,11 @@ def load_metadata():
                 caption = f.read().strip()
         except Exception as e:
             logger.warning(f"Error reading caption.txt: {e}")
-    
+
     return {
-        "title": "How to Save Money in Your 20s #Shorts",
+        "title": "Future of Work and Money #Shorts",
         "description": caption,
-        "hashtags": "#personalfinance #moneytok"
+        "hashtags": "#personalfinance #moneytok",
     }
 
 def authenticate_youtube():
