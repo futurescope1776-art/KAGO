@@ -2,6 +2,53 @@ version: 2.1
 setup: false
 
 jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # Main pipeline: generate content + post to YouTube Shorts & Facebook Reels
+  # ─────────────────────────────────────────────────────────────────────────
+  generate_and_post:
+    docker:
+      - image: cimg/python:3.11
+    resource_class: medium
+    steps:
+      - checkout
+
+      - run:
+          name: Install system dependencies (ffmpeg + ImageMagick)
+          command: |
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends ffmpeg imagemagick
+            # Allow ImageMagick to render text (TextClip in MoviePy needs this)
+            sudo sed -i \
+              's|<policy domain="path" rights="none" pattern="@\*"/>||g' \
+              /etc/ImageMagick-6/policy.xml 2>/dev/null || true
+            sudo sed -i \
+              's|rights="none" pattern="PDF"|rights="read|write" pattern="PDF"|g' \
+              /etc/ImageMagick-6/policy.xml 2>/dev/null || true
+
+      - run:
+          name: Install Python dependencies
+          command: |
+            pip install --quiet \
+              openai \
+              gtts \
+              "moviepy<2.0" \
+              requests \
+              google-api-python-client \
+              google-auth \
+              google-auth-oauthlib \
+              google-auth-httplib2
+
+      - run:
+          name: Generate script, build video, and post
+          command: python generate_and_post.py
+
+      - store_artifacts:
+          path: output
+          destination: artifacts
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Legacy: upload a pre-built video to YouTube (kept for manual runs)
+  # ─────────────────────────────────────────────────────────────────────────
   upload_youtube_short:
     docker:
       - image: cimg/python:3.11
@@ -10,18 +57,16 @@ jobs:
       - run:
           name: Install YouTube deps
           command: |
-            pip install google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
+            pip install --quiet \
+              google-api-python-client google-auth google-auth-oauthlib google-auth-httplib2
       - run:
           name: Upload YouTube Short
           command: |
-            # If your script is in a different folder, change the path below
-            if [ -f "upload_youtube.py" ]; then
+            if [ -f "upload_to_youtube.py" ]; then
+              python upload_to_youtube.py
+            elif [ -f "upload_youtube.py" ]; then
               python upload_youtube.py
-            elif [ -f "scripts/upload_youtube.py" ]; then
-              python scripts/upload_youtube.py
             else
-              echo "Checking for YouTube script..."
-              find . -name "*youtube*.py" -type f
               python $(find . -name "*youtube*.py" | head -1)
             fi
 
@@ -48,6 +93,23 @@ jobs:
 
 workflows:
   version: 2
+
+  # ── Daily automated content pipeline ──────────────────────────────────────
+  # Fires Monday–Friday at 2 PM UTC (9 AM ET / 10 AM EDT).
+  # Uses the `ai-social` context for all API keys.
+  daily_content:
+    triggers:
+      - schedule:
+          cron: "0 14 * * 1-5"
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - generate_and_post:
+          context: ai-social
+
+  # ── On-push workflow (manual uploads + deploy tracking) ───────────────────
   main_workflow:
     jobs:
       - upload_youtube_short:
